@@ -24,6 +24,7 @@ A simple, locally-runnable notes application with a React + TypeScript frontend 
 - **Unsaved-change protection** — warns before switching notes or creating new ones with unsaved edits
 - **Confirmed deletion** — requires confirmation before deleting a note
 - **Persistent backend storage** — stored in `backend/data/notes.json` on the server, independent of browser data
+- **Tags** — create, assign, and filter notes by tags (see below)
 
 ## Storage Location
 
@@ -121,7 +122,25 @@ test report; Playwright failure screenshots/traces use `test-results/` by defaul
 Use only synthetic data. The caller repair and its qualification are distinct
 from the failed hosted S execution and its missing feature PR.
 
+## Tags
+
+Tags are global, named labels that can be assigned to notes.
+
+### Tag rules
+- **Unique names** — tag names are case-insensitively unique (e.g. "Work" and "work" are the same tag).
+- **Trimmed** — leading/trailing whitespace is stripped on creation.
+- **Non-blank** — a blank name (or whitespace-only) is rejected.
+- **Cascade delete** — deleting a tag removes it from all notes.
+
+### Using tags
+- Open a note and use the **Tags** panel on the right to assign or remove tags.
+- Create a new global tag from the "New tag" input; it is auto-assigned to the current note.
+- Filter the note list by clicking a tag pill in the sidebar. Only one tag may be active at a time; clicking another tag replaces the current filter. Click the active tag again to clear the filter.
+- Manage (delete) global tags from the "Manage tags" section in the Tags panel.
+
 ## API Endpoints
+
+### Notes
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -129,8 +148,27 @@ from the failed hosted S execution and its missing feature PR.
 | POST | `/api/notes` | Create a note (`{title, body}`) |
 | GET | `/api/notes/:id` | Get a note by ID |
 | PUT | `/api/notes/:id` | Update a note (`{title, body}`) |
-| DELETE | `/api/notes/:id` | Delete a note |
+| DELETE | `/api/notes/:id` | Delete a note (cascades tag associations) |
 | GET | `/api/storage-info` | Get storage file path |
+
+### Tags
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tags` | List all tags |
+| POST | `/api/tags` | Create a tag (`{name}`) |
+| GET | `/api/tags/:id` | Get a tag by ID |
+| PUT | `/api/tags/:id` | Rename a tag (`{name}`) |
+| DELETE | `/api/tags/:id` | Delete a tag (cascades associations) |
+
+### Note-Tag Associations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/notes/:id/tags` | Get tags for a note |
+| POST | `/api/notes/:id/tags/:tagId` | Assign a tag to a note (idempotent) |
+| DELETE | `/api/notes/:id/tags/:tagId` | Unassign a tag from a note |
+| PUT | `/api/notes/:id/tags` | Replace all tags for a note (`{tagIds: string[]}`) |
 
 ## Persistence Behavior
 
@@ -172,6 +210,7 @@ notes-app/
         ├── api.ts           # Backend API client
         ├── types.ts         # Shared TypeScript types
         └── components/
-            ├── NoteList.tsx  # Sidebar note list
-            └── NoteEditor.tsx # Note editing panel
+            ├── NoteList.tsx   # Sidebar note list (with tag filter)
+            ├── NoteEditor.tsx # Note editing panel
+            └── TagManager.tsx # Tag assignment and management panel
 ```
