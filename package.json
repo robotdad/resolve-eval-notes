@@ -5,6 +5,9 @@
   "scripts": {
     "test": "cd backend && npm test",
     "test:backend": "cd backend && npm test",
+    "test:e2e": "playwright test",
+    "test:harness": "node --test test-support/stack.test.mjs",
+    "typecheck": "tsc --noEmit -p backend/tsconfig.json && tsc --noEmit -p frontend/tsconfig.json && tsc -p tsconfig.e2e.json",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
     "start": "cd backend && npm start",
     "dev:backend": "cd backend && npm run dev",
@@ -14,5 +17,8 @@
   "workspaces": [
     "backend",
     "frontend"
-  ]
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
 }

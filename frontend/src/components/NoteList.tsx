@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { Note } from '../types';
 
 interface NoteListProps {
@@ -5,14 +6,16 @@ interface NoteListProps {
   selectedId: string | null;
   onSelect: (note: Note) => void;
   onNew: () => void;
+  newButtonRef: RefObject<HTMLButtonElement>;
 }
 
-export function NoteList({ notes, selectedId, onSelect, onNew }: NoteListProps) {
+export function NoteList({ notes, selectedId, onSelect, onNew, newButtonRef }: NoteListProps) {
   return (
     <div style={{ width: '280px', borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={{ padding: '16px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0, fontSize: '18px' }}>Notes</h2>
         <button
+          ref={newButtonRef}
           onClick={onNew}
           style={{ padding: '6px 12px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}
         >

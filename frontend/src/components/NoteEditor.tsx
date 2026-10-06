@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Note } from '../types';
 
 interface NoteEditorProps {
@@ -16,6 +16,12 @@ export function NoteEditor({ note, isNew, onSave, onDelete, onCancel, error, onD
   const [body, setBody] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Refs for focus management
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (note) {
@@ -48,6 +54,53 @@ export function NoteEditor({ note, isNew, onSave, onDelete, onCancel, error, onD
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
+
+  // Focus the Cancel button when the dialog opens
+  useEffect(() => {
+    if (showDeleteConfirm && cancelDeleteRef.current) {
+      cancelDeleteRef.current.focus();
+    }
+  }, [showDeleteConfirm]);
+
+  // Focus trap handler for the dialog
+  const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowDeleteConfirm(false);
+      // Restore focus to the Delete button
+      deleteButtonRef.current?.focus();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const focusableElements = dialogRef.current
+        ? Array.from(
+            dialogRef.current.querySelectorAll<HTMLElement>(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => !el.hasAttribute('disabled'))
+        : [];
+
+      if (focusableElements.length === 0) return;
+
+      const firstEl = focusableElements[0];
+      const lastEl = focusableElements[focusableElements.length - 1];
+
+      if (e.shiftKey) {
+        // Shift+Tab: if focus is on first element, wrap to last
+        if (document.activeElement === firstEl) {
+          e.preventDefault();
+          lastEl.focus();
+        }
+      } else {
+        // Tab: if focus is on last element, wrap to first
+        if (document.activeElement === lastEl) {
+          e.preventDefault();
+          firstEl.focus();
+        }
+      }
+    }
+  }, []);
 
   const handleTitleChange = (value: string) => {
     setTitle(value);
@@ -88,24 +141,37 @@ export function NoteEditor({ note, isNew, onSave, onDelete, onCancel, error, onD
 
   const handleDeleteCancel = () => {
     setShowDeleteConfirm(false);
+    // Restore focus to the Delete button
+    deleteButtonRef.current?.focus();
   };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px', height: '100vh', boxSizing: 'border-box', position: 'relative' }}>
       {/* Delete confirmation dialog */}
       {showDeleteConfirm && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000
-        }}>
-          <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', maxWidth: '400px', width: '90%' }}>
-            <h3 style={{ margin: '0 0 12px 0' }}>Delete Note?</h3>
-            <p style={{ margin: '0 0 20px 0', color: '#555' }}>
-              Are you sure you want to delete "{note?.title}"? This cannot be undone.
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 1000
+          }}
+        >
+          <div
+            ref={dialogRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            aria-describedby="delete-dialog-desc"
+            onKeyDown={handleDialogKeyDown}
+            style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', maxWidth: '400px', width: '90%' }}
+          >
+            <h3 id="delete-dialog-title" style={{ margin: '0 0 12px 0' }}>Delete Note?</h3>
+            <p id="delete-dialog-desc" style={{ margin: '0 0 20px 0', color: '#555' }}>
+              Are you sure you want to delete &quot;{note?.title}&quot;? This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
+                ref={cancelDeleteRef}
                 onClick={handleDeleteCancel}
                 data-testid="cancel-delete"
                 style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}
@@ -113,6 +179,7 @@ export function NoteEditor({ note, isNew, onSave, onDelete, onCancel, error, onD
                 Cancel
               </button>
               <button
+                ref={confirmDeleteRef}
                 onClick={handleDeleteConfirm}
                 data-testid="confirm-delete"
                 style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px' }}
@@ -136,6 +203,7 @@ export function NoteEditor({ note, isNew, onSave, onDelete, onCancel, error, onD
         <div style={{ display: 'flex', gap: '8px' }}>
           {!isNew && note && (
             <button
+              ref={deleteButtonRef}
               onClick={handleDeleteRequest}
               data-testid="delete-button"
               style={{ padding: '6px 12px', cursor: 'pointer', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px' }}

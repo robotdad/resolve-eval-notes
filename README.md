@@ -81,6 +81,46 @@ npm test
 
 Tests use a temporary `backend/test-data/` directory that is cleaned up automatically.
 
+### Caller-repaired browser harness (qualification required)
+
+From the repository root, on Linux with a supported sandbox-enabled Playwright
+Chromium already installed:
+
+```bash
+npm ci --ignore-scripts
+npm run typecheck
+npm run build
+npm run test:backend
+npm run test:harness
+npm run test:e2e
+```
+
+The browser harness uses the existing `@playwright/test` 1.63 dependency, requires
+`chromiumSandbox: true`, and must stop if the host refuses sandboxed launch.
+Do not disable the sandbox to obtain a pass. Dependency installation alone does
+not install a browser or qualify the runtime.
+
+`e2e/fixtures.ts` owns both test servers. The frontend's actual `start` script
+uses `test-support/vite.config.mjs` on **127.0.0.1:43171**, proxying to the
+test-only backend launcher on **127.0.0.1:43172**. Both ports must be free;
+there is no reuse of existing servers. Each worker gets a fresh synthetic
+temporary `NOTES_DATA_DIR`, removed on teardown. The restart test closes the
+browser process and both servers, then starts fresh processes using the same
+temporary disk store. These launchers are harness isolation, **not fixes to
+the application's ordinary bind, CORS or storage-path behavior**.
+
+The tests cover named accessible dialog lookup and Chromium accessibility-tree
+exposure, initial Cancel focus, forward/reverse Tab containment, Escape/Cancel
+draft preservation, background pointer blocking, selected-ID deletion and New
+focus (including the last note), plus CRUD, validation, dirty/save/discard guards
+and full restart persistence. This is not universal assistive-technology or
+cross-browser coverage. A discovered/typechecked test is not a runtime pass.
+
+Set `E2E_EVIDENCE_DIR` for server lifecycle logs and `E2E_REPORT` for the JSON
+test report; Playwright failure screenshots/traces use `test-results/` by default.
+Use only synthetic data. The caller repair and its qualification are distinct
+from the failed hosted S execution and its missing feature PR.
+
 ## API Endpoints
 
 | Method | Path | Description |

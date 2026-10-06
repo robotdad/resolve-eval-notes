@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Note } from './types';
 import { fetchNotes, createNote, updateNote, deleteNote } from './api';
 import { NoteList } from './components/NoteList';
@@ -12,6 +12,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [editorRevision, setEditorRevision] = useState(0);
+  const newNoteButtonRef = useRef<HTMLButtonElement>(null);
 
   const loadNotes = useCallback(async () => {
     try {
@@ -86,6 +87,7 @@ function App() {
       setSelectedNote(null);
       setIsNewNote(false);
       setIsDirty(false);
+      newNoteButtonRef.current?.focus();
     } catch {
       setError('Failed to delete note');
     }
@@ -120,6 +122,7 @@ function App() {
         selectedId={selectedNote?.id ?? null}
         onSelect={handleSelectNote}
         onNew={handleNewNote}
+        newButtonRef={newNoteButtonRef}
       />
       <NoteEditor
         key={editorRevision}
