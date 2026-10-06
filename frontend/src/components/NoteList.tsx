@@ -11,6 +11,8 @@ interface NoteListProps {
   allTags?: Tag[];
   /** Map from noteId to its assigned tags (for rendering chips and filtering) */
   noteTagsMap?: Map<string, Tag[]>;
+  /** Called when the active tag filter changes (null = no filter) */
+  onTagFilterChange?: (tagId: string | null) => void;
 }
 
 /**
@@ -29,9 +31,21 @@ interface NoteListProps {
  *   - Sorting changes presentation only; note identity and saved content are unchanged.
  *
  * Tag filter semantics:
- *   - When one or more tags are selected, only notes that have ALL selected tags are shown.
- *   - Tag filter is applied after text search (intersection of both filters).
- *   - Selecting no tags shows all notes (no tag filtering).
+ *   - At most ONE tag can be selected at a time (single-tag filter).
+ *   - Selecting a tag that is already active DESELECTS it (acts as a toggle).
+ *   - Selecting a DIFFERENT tag replaces the prior filter (single active tag).
+ *   - Tag filter is applied after text search (composed intersection).
+ *   - Selecting no tag shows all notes (no tag filtering).
+ *   - When the active filter tag is deleted externally, the filter is cleared immediately.
+ *
+ * L-01 reproduction:
+ *   assign Work to note-a and note-z, Personal to note-m.
+ *   Select Work -> note-a and note-z shown.
+ *   Then select Personal -> Work is replaced, only note-m shown.
+ *
+ * L-02 reproduction:
+ *   Delete the active filter tag -> filter cleared immediately.
+ *   Surviving notes appear without restart.
  */
 
 type SortDirection = 'asc' | 'desc';
@@ -61,19 +75,15 @@ function filterNotes(notes: Note[], query: string): Note[] {
   );
 }
 
-function filterByTags(
+function filterByTag(
   notes: Note[],
-  selectedTagIds: Set<string>,
+  activeTagId: string | null,
   noteTagsMap: Map<string, Tag[]>
 ): Note[] {
-  if (selectedTagIds.size === 0) return notes;
+  if (!activeTagId) return notes;
   return notes.filter((n) => {
     const noteTags = noteTagsMap.get(n.id) ?? [];
-    const noteTagIds = new Set(noteTags.map((t) => t.id));
-    for (const tagId of selectedTagIds) {
-      if (!noteTagIds.has(tagId)) return false;
-    }
-    return true;
+    return noteTags.some((t) => t.id === activeTagId);
   });
 }
 
@@ -85,14 +95,20 @@ export function NoteList({
   newButtonRef,
   allTags = [],
   noteTagsMap = new Map(),
+  onTagFilterChange,
 }: NoteListProps) {
   const [query, setQuery] = useState('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  // Single active tag filter (null = no filter)
+  const [activeTagId, setActiveTagId] = useState<string | null>(null);
 
-  // Apply text filter, then tag filter, then sort
+  // If the active tag was deleted externally, clear the filter
+  const activeTagExists = activeTagId ? allTags.some((t) => t.id === activeTagId) : true;
+  const effectiveTagId = activeTagExists ? activeTagId : null;
+
+  // Apply text filter, then single-tag filter, then sort
   const textFiltered = filterNotes(notes, query);
-  const tagFiltered = filterByTags(textFiltered, selectedTagIds, noteTagsMap);
+  const tagFiltered = filterByTag(textFiltered, effectiveTagId, noteTagsMap);
   const displayed = sortNotes(tagFiltered, sortDirection);
 
   const handleClear = () => {
@@ -100,24 +116,19 @@ export function NoteList({
   };
 
   const handleClearTagFilter = () => {
-    setSelectedTagIds(new Set());
+    setActiveTagId(null);
+    onTagFilterChange?.(null);
   };
 
   const toggleTagFilter = (tagId: string) => {
-    setSelectedTagIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagId)) {
-        next.delete(tagId);
-      } else {
-        next.add(tagId);
-      }
-      return next;
-    });
+    const next = activeTagId === tagId ? null : tagId;
+    setActiveTagId(next);
+    onTagFilterChange?.(next);
   };
 
+  const hasTagFilter = !!effectiveTagId;
   const isEmpty = notes.length === 0;
   const noResults = !isEmpty && displayed.length === 0;
-  const hasTagFilter = selectedTagIds.size > 0;
 
   return (
     <div style={{ width: '280px', borderRight: '1px solid #ddd', display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -200,7 +211,7 @@ export function NoteList({
           </button>
         </div>
 
-        {/* Tag filter */}
+        {/* Tag filter — single-select, clicking active tag deselects, clicking different tag replaces */}
         {allTags.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -221,7 +232,7 @@ export function NoteList({
               style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
             >
               {allTags.map((tag) => {
-                const active = selectedTagIds.has(tag.id);
+                const active = effectiveTagId === tag.id;
                 return (
                   <button
                     key={tag.id}
@@ -256,7 +267,7 @@ export function NoteList({
         ) : noResults ? (
           <div style={{ padding: '16px', textAlign: 'center' }}>
             <p style={{ color: '#666', marginBottom: '8px' }} data-testid="no-results">
-              No notes match{query ? ` "${query}"` : ''}{hasTagFilter ? ' with selected tags' : ''}.
+              No notes match{query ? ` "${query}"` : ''}{hasTagFilter ? ' with selected tag' : ''}.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
               {query && (

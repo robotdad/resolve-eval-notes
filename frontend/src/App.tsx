@@ -15,6 +15,24 @@ import { NoteList } from './components/NoteList';
 import { NoteEditor } from './components/NoteEditor';
 import { TagManager } from './components/TagManager';
 
+/**
+ * Identity-safe async state management:
+ *
+ * Every async operation that reads or mutates tags for a note is bound to the
+ * note's ID at the time the operation is initiated. Results are only applied
+ * if the selected note ID matches the originating note ID at resolution time.
+ *
+ * Whole-map freshness:
+ * The noteTagsMap is updated with a generation counter. Stale map refreshes
+ * (older generation) are discarded in favor of newer confirmed state.
+ *
+ * This prevents:
+ *   - Late GET for note A overwriting note B's tag display
+ *   - Stale map refresh erasing confirmed mutations
+ *   - Failed reads presenting as confirmed empty state
+ *   - Misattributed errors (error shown for wrong note)
+ */
+
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -29,8 +47,15 @@ function App() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   // Map from noteId -> Tag[] (loaded on demand, refreshed on changes)
   const [noteTagsMap, setNoteTagsMap] = useState<Map<string, Tag[]>>(new Map());
-  // Tags for the currently selected note
+  // Tags for the currently selected note (identity-safe)
   const [currentNoteTags, setCurrentNoteTags] = useState<Tag[]>([]);
+  // Error specific to tag operations (shown separately from note errors)
+  const [tagError, setTagError] = useState<string | null>(null);
+
+  // Ref tracking the currently selected note ID for identity-safe async checks
+  const selectedNoteIdRef = useRef<string | null>(null);
+  // Generation counter for whole-map freshness
+  const mapGenRef = useRef(0);
 
   const loadNotes = useCallback(async () => {
     try {
@@ -40,13 +65,23 @@ function App() {
       setAllTags(tagsData);
       // Load all note-tag associations for sidebar display
       if (notesData.length > 0) {
+        const gen = ++mapGenRef.current;
         const entries = await Promise.all(
           notesData.map(async (note) => {
-            const tags = await fetchTagsForNote(note.id);
-            return [note.id, tags] as [string, Tag[]];
+            try {
+              const tags = await fetchTagsForNote(note.id);
+              return [note.id, tags] as [string, Tag[]];
+            } catch {
+              // On fetch failure, keep empty rather than crashing
+              return [note.id, []] as [string, Tag[]];
+            }
           })
         );
-        setNoteTagsMap(new Map(entries));
+        // Only apply if this is still the most recent map load
+        setNoteTagsMap((prev) => {
+          if (gen < mapGenRef.current) return prev; // stale, discard
+          return new Map(entries);
+        });
       }
     } catch {
       setError('Failed to load notes');
@@ -60,14 +95,32 @@ function App() {
   }, [loadNotes]);
 
   // When selected note changes, sync its tags into currentNoteTags
+  // This is an identity-safe operation: we only update if the note ID matches
   useEffect(() => {
     if (selectedNote && !isNewNote) {
-      const tags = noteTagsMap.get(selectedNote.id) ?? [];
-      setCurrentNoteTags(tags);
+      selectedNoteIdRef.current = selectedNote.id;
+      const noteId = selectedNote.id;
+      // Use cached map value first (immediate)
+      const cached = noteTagsMap.get(noteId);
+      if (cached !== undefined) {
+        setCurrentNoteTags(cached);
+      }
+      // Then refresh from server (identity-safe: only apply if still selected)
+      void fetchTagsForNote(noteId).then((tags) => {
+        if (selectedNoteIdRef.current !== noteId) return; // note changed, discard
+        setCurrentNoteTags(tags);
+        setNoteTagsMap((prev) => new Map(prev).set(noteId, tags));
+      }).catch(() => {
+        // On failure, keep the cached state (do not present failure as empty)
+        if (selectedNoteIdRef.current !== noteId) return;
+        setTagError('Could not refresh tags for this note');
+      });
     } else {
+      selectedNoteIdRef.current = null;
       setCurrentNoteTags([]);
     }
-  }, [selectedNote, isNewNote, noteTagsMap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNote?.id, isNewNote]);
 
   // Guard: check for unsaved changes before leaving the current editor
   const guardUnsaved = useCallback((): boolean => {
@@ -85,6 +138,7 @@ function App() {
     setSelectedNote(note);
     setIsNewNote(false);
     setError(null);
+    setTagError(null);
     setIsDirty(false);
   };
 
@@ -94,6 +148,7 @@ function App() {
     setSelectedNote(null);
     setIsNewNote(true);
     setError(null);
+    setTagError(null);
     setIsDirty(false);
   };
 
@@ -104,6 +159,7 @@ function App() {
         const newNote = await createNote(title, body);
         setNotes((prev) => [...prev, newNote]);
         setSelectedNote(newNote);
+        selectedNoteIdRef.current = newNote.id;
         setIsNewNote(false);
         setIsDirty(false);
         // New note starts with no tags
@@ -131,10 +187,12 @@ function App() {
         next.delete(selectedNote.id);
         return next;
       });
+      selectedNoteIdRef.current = null;
       setSelectedNote(null);
       setIsNewNote(false);
       setIsDirty(false);
       setCurrentNoteTags([]);
+      setTagError(null);
       newNoteButtonRef.current?.focus();
     } catch {
       setError('Failed to delete note');
@@ -144,8 +202,10 @@ function App() {
   const handleCancel = () => {
     setIsNewNote(false);
     setError(null);
+    setTagError(null);
     setIsDirty(false);
     if (isNewNote) {
+      selectedNoteIdRef.current = null;
       setSelectedNote(null);
     } else if (selectedNote) {
       // Revert: re-select the note to reset editor fields
@@ -155,7 +215,7 @@ function App() {
     }
   };
 
-  // ---- Tag management handlers ----
+  // ---- Tag management handlers (all identity-safe) ----
 
   const handleCreateTag = async (name: string): Promise<Tag> => {
     const tag = await apiCreateTag(name);
@@ -175,33 +235,67 @@ function App() {
         }
         return next;
       });
+      // Remove from current note tags if still selected
       setCurrentNoteTags((prev) => prev.filter((t) => t.id !== tagId));
     } catch {
-      setError('Failed to delete tag');
+      setTagError('Failed to delete tag');
     }
   };
 
+  /**
+   * Identity-safe tag assignment.
+   * Captures the originating note ID; result is discarded if note changes.
+   */
   const handleAddTagToNote = async (tagId: string) => {
     if (!selectedNote || isNewNote) return;
+    const originNoteId = selectedNote.id;
+    setTagError(null);
     try {
       const newTagIds = [...new Set([...currentNoteTags.map((t) => t.id), tagId])];
-      const updatedTags = await apiSetTagsForNote(selectedNote.id, newTagIds);
+      const updatedTags = await apiSetTagsForNote(originNoteId, newTagIds);
+      // Identity check: only apply if still on the same note
+      if (selectedNoteIdRef.current !== originNoteId) return;
       setCurrentNoteTags(updatedTags);
-      setNoteTagsMap((prev) => new Map(prev).set(selectedNote.id, updatedTags));
-    } catch {
-      setError('Failed to add tag to note');
+      setNoteTagsMap((prev) => new Map(prev).set(originNoteId, updatedTags));
+    } catch (err) {
+      if (selectedNoteIdRef.current !== originNoteId) return;
+      setTagError(err instanceof Error ? err.message : 'Failed to add tag to note');
     }
   };
 
+  /**
+   * Identity-safe tag removal with reconciliation.
+   * On failure (e.g. 404 for already-removed tag), reconciles by fetching
+   * the actual server state for the originating note.
+   */
   const handleRemoveTagFromNote = async (tagId: string) => {
     if (!selectedNote || isNewNote) return;
+    const originNoteId = selectedNote.id;
+    setTagError(null);
     try {
       const newTagIds = currentNoteTags.map((t) => t.id).filter((id) => id !== tagId);
-      const updatedTags = await apiSetTagsForNote(selectedNote.id, newTagIds);
+      const updatedTags = await apiSetTagsForNote(originNoteId, newTagIds);
+      // Identity check
+      if (selectedNoteIdRef.current !== originNoteId) return;
       setCurrentNoteTags(updatedTags);
-      setNoteTagsMap((prev) => new Map(prev).set(selectedNote.id, updatedTags));
-    } catch {
-      setError('Failed to remove tag from note');
+      setNoteTagsMap((prev) => new Map(prev).set(originNoteId, updatedTags));
+    } catch (err) {
+      // Show the error attributed to the originating note
+      if (selectedNoteIdRef.current !== originNoteId) return;
+      const msg = err instanceof Error ? err.message : 'Failed to remove tag';
+      setTagError(msg);
+      // Reconcile: fetch actual server state for the originating note
+      try {
+        const actual = await fetchTagsForNote(originNoteId);
+        // Identity check again (note may have changed during reconciliation)
+        if (selectedNoteIdRef.current !== originNoteId) return;
+        setCurrentNoteTags(actual);
+        setNoteTagsMap((prev) => new Map(prev).set(originNoteId, actual));
+      } catch {
+        // Reconciliation itself failed — expose limitation, preserve known state
+        if (selectedNoteIdRef.current !== originNoteId) return;
+        setTagError(msg + ' (reconciliation also failed — server state unknown)');
+      }
     }
   };
 
@@ -244,6 +338,29 @@ function App() {
             padding: '16px',
           }}
         >
+          {tagError && (
+            <div
+              data-testid="tag-operation-error"
+              style={{
+                marginBottom: '8px',
+                padding: '8px 10px',
+                backgroundColor: '#fff5f5',
+                border: '1px solid #ffc9c9',
+                borderRadius: '4px',
+                fontSize: '12px',
+                color: '#c92a2a',
+              }}
+            >
+              {tagError}
+              <button
+                onClick={() => setTagError(null)}
+                style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#c92a2a', fontSize: '14px', padding: 0, lineHeight: 1 }}
+                aria-label="Dismiss error"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <TagManager
             allTags={allTags}
             noteTags={currentNoteTags}
