@@ -6,6 +6,17 @@ export interface Note {
   updatedAt: string;
 }
 
+export interface Tag {
+  id: string;
+  name: string; // normalized (trimmed) display name
+  createdAt: string;
+}
+
+export interface NoteTagAssociation {
+  noteId: string;
+  tagId: string;
+}
+
 export interface CreateNoteRequest {
   title: string;
   body: string;
@@ -18,4 +29,6 @@ export interface UpdateNoteRequest {
 
 export interface NotesStore {
   notes: Note[];
+  tags?: Tag[];
+  noteTagAssociations?: NoteTagAssociation[];
 }
