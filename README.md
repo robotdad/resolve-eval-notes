@@ -135,7 +135,7 @@ Tags are global, named labels that can be assigned to notes.
 ### Using tags
 - Open a note and use the **Tags** panel on the right to assign or remove tags.
 - Create a new global tag from the "New tag" input; it is auto-assigned to the current note.
-- Filter the note list by clicking tag pills in the sidebar. Multiple selected tags act as AND (notes must have all selected tags).
+- Filter the note list by clicking a tag pill in the sidebar. Only one tag may be active at a time; clicking another tag replaces the current filter. Click the active tag again to clear the filter.
 - Manage (delete) global tags from the "Manage tags" section in the Tags panel.
 
 ## API Endpoints
